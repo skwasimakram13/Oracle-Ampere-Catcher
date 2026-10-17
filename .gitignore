@@ -1,0 +1,10 @@
+# Ignore local secrets and environment files
+*.pem
+*.key
+*.ppk
+*.env
+oci_config
+your_ssh_key
+*.log
+__pycache__/
+.DS_Store

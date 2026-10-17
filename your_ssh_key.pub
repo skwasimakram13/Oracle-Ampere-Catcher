@@ -1,1 +1,2 @@
-bitefast_ssh_key.pub will be here
+# Placeholder public SSH key - safe to keep as an example but replace before use
+ssh-rsa AAAA... <your_email@example.com>

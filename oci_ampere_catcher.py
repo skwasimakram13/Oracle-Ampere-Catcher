@@ -1,98 +1,132 @@
-import oci
-import time
+#!/usr/bin/env python3
+"""
+OCI Ampere A1 Auto-Catcher (sanitized template)
+This version uses environment variables and placeholder values only; do not commit real keys or OCIDs.
+"""
 import os
+import time
 import sys
+from pathlib import Path
 
-# Ensure UTF-8 output encoding on Windows consoles
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+try:
+    import oci
+except Exception:
+    print("[ERROR] The 'oci' Python package is required. Install with: pip install oci")
+    raise
 
-# ==============================================================================
-# DEMOODY ORACLE AMPERE A1 AUTO-CATCHER
-# Automatically claims your Always Free 2-Core / 12 GB RAM Ampere A1 server
-# as soon as a slot frees up in Oracle Hyderabad (ap-hyderabad-1).
-# ==============================================================================
+# Configuration via environment variables (safe defaults are placeholders)
+CONFIG_PATH = os.environ.get("OCI_CONFIG_PATH", str(Path.home() / ".oci" / "config"))
+CONFIG_PROFILE = os.environ.get("OCI_CONFIG_PROFILE", "DEFAULT")
+SSH_PUB_KEY_PATH = os.environ.get("SSH_PUB_KEY_PATH", str(Path.home() / ".ssh" / "your_ssh_key.pub"))
+SUCCESS_FILE = os.environ.get("SUCCESS_FILE", str(Path.home() / "SERVER_CAUGHT_SUCCESS.txt"))
+LOG_PATH = os.environ.get("CATCHER_LOG_PATH", str(Path.home() / "ampere_catcher_log.txt"))
 
-CONFIG_PATH = r"C:\YOUR_FOLDER_PATH\oci_config"
-SSH_PUB_KEY_PATH = r"C:\YOUR_FOLDER_PATH\your_ssh_key.pub"
-SUCCESS_FILE = r"C:\YOUR_FOLDER_PATH\\SERVER_CAUGHT_SUCCESS.txt"
+# OCI resource placeholders (set these in environment or replace with real OCIDs locally)
+COMPARTMENT_ID = os.environ.get("COMPARTMENT_ID", "<COMPARTMENT_OCID>")
+AVAILABILITY_DOMAIN = os.environ.get("AVAILABILITY_DOMAIN", "<AVAILABILITY_DOMAIN>")
+SUBNET_ID = os.environ.get("SUBNET_ID", "<SUBNET_OCID>")
+IMAGE_ID = os.environ.get("IMAGE_ID", "<IMAGE_OCID>")
+
+# Instance shape config (can be tuned). Use environment vars to override.
+OCPUS = int(os.environ.get("OCPUS", "1"))
+MEMORY_IN_GBS = int(os.environ.get("MEMORY_IN_GBS", "6"))
+BOOT_VOLUME_GB = int(os.environ.get("BOOT_VOLUME_GB", "50"))
+
+# Generic display name
+DISPLAY_NAME = os.environ.get("DISPLAY_NAME", "your-server")
+SHAPE = os.environ.get("SHAPE", "VM.Standard.A1.Flex")
+
 
 def play_success_sound():
-    try:
-        import winsound
-        # Play high-pitched victory chimes
-        for freq in [523, 659, 783, 1046]:
-            winsound.Beep(freq, 300)
-    except Exception:
-        pass
+    """Play a short alert on Windows. Quietly no-op on other platforms."""
+    if sys.platform.startswith("win"):
+        try:
+            import winsound
+            for freq in [523, 659, 783, 1046]:
+                winsound.Beep(freq, 200)
+        except Exception:
+            pass
+
+
+def load_oci_config(path: str, profile: str = "DEFAULT"):
+    """Load OCI config from file path and profile. Raises if missing.
+    This function only reads config; it does not contain secrets.
+    """
+    if not Path(path).exists():
+        raise FileNotFoundError(f"OCI config file not found at: {path}")
+    return oci.config.from_file(file_location=path, profile_name=profile)
+
 
 def run_catcher():
-    if not os.path.exists(CONFIG_PATH):
-        print(f"[ERROR] Config not found at: {CONFIG_PATH}")
+    # Validate SSH public key file
+    if not Path(SSH_PUB_KEY_PATH).exists():
+        print(f"[ERROR] SSH public key not found at: {SSH_PUB_KEY_PATH}")
         return
 
-    config = oci.config.from_file(CONFIG_PATH)
+    try:
+        config = load_oci_config(CONFIG_PATH, CONFIG_PROFILE)
+    except Exception as e:
+        print(f"[ERROR] Failed to load OCI config: {e}")
+        return
+
+    # Use provided compartment ID or fall back to tenancy (only for templates)
+    compartment_id = COMPARTMENT_ID
+    if compartment_id.startswith("<"):
+        # Fallback: use tenancy if user didn't set COMPARTMENT_ID (template behavior)
+        compartment_id = config.get("tenancy")
+        print("[WARN] COMPARTMENT_ID not set; falling back to tenancy OCID from config. For production use a compartment OCID.")
+
     compute_client = oci.core.ComputeClient(config)
 
-    # Read SSH public key
     with open(SSH_PUB_KEY_PATH, "r", encoding="utf-8") as f:
         ssh_public_key = f.read().strip()
 
-    compartment_id = config["tenancy"]
-    availability_domain = "YOUR_DOMAIN"
-    subnet_id = "YOUR_SUBNET_ID"
-    image_id = "YOUR_IMAGE_ID" # Canonical Ubuntu 24.04 ARM64
-
-    # Requested specs: 1 OCPU, 6 GB RAM, 50 GB Boot Volume (Always Free)
-    # 1 Core / 6 GB has a significantly higher chance of catching a free slot in Hyderabad!
-    ocpus = 1
-    memory_in_gbs = 6
-    boot_volume_gb = 50
-
+    # Construct launch details using placeholders. Replace environment variables with real values locally.
     launch_details = oci.core.models.LaunchInstanceDetails(
         compartment_id=compartment_id,
-        availability_domain=availability_domain,
-        display_name="your-server",
-        shape="VM.Standard.A1.Flex",
+        availability_domain=AVAILABILITY_DOMAIN,
+        display_name=DISPLAY_NAME,
+        shape=SHAPE,
         shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-            ocpus=ocpus,
-            memory_in_gbs=memory_in_gbs
+            ocpus=OCPUS,
+            memory_in_gbs=MEMORY_IN_GBS,
         ),
         source_details=oci.core.models.InstanceSourceViaImageDetails(
-            image_id=image_id,
-            boot_volume_size_in_gbs=boot_volume_gb
+            image_id=IMAGE_ID,
+            boot_volume_size_in_gbs=BOOT_VOLUME_GB,
         ),
         create_vnic_details=oci.core.models.CreateVnicDetails(
-            subnet_id=subnet_id,
-            assign_public_ip=True
+            subnet_id=SUBNET_ID,
+            assign_public_ip=True,
         ),
         metadata={
-            "ssh_authorized_keys": ssh_public_key
-        }
+            "ssh_authorized_keys": ssh_public_key,
+        },
     )
 
-    log_path = r"D:\YOUR_FOLDER_PATH\catcher_log.txt"
-
     print("=" * 70)
-    print(">>> DEMOODY ORACLE AMPERE A1 AUTO-CATCHER ACTIVE (2-CORE / 12GB OPTIMIZED) <<<")
-    print(f"Datacenter:       {config.get('region', 'ap-hyderabad-1')} ({availability_domain})")
-    print(f"Instance Specs:   {ocpus} OCPU (ARM Neoverse N1) | {memory_in_gbs} GB RAM | {boot_volume_gb} GB NVMe")
-    print(f"Target Strategy:  High-frequency 1-Core snatch (35s interval)")
-    print(f"SSH Key Attached: {SSH_PUB_KEY_PATH}")
+    print(">>> OCI AMPERE CATCHER (sanitized template) <<<")
+    print(f"Region (from config): {config.get('region', '<REGION_PLACEHOLDER>')}")
+    print(f"Availability Domain: {AVAILABILITY_DOMAIN}")
+    print(f"Instance Specs: {OCPUS} OCPU | {MEMORY_IN_GBS} GB RAM | {BOOT_VOLUME_GB} GB boot")
+    print(f"Shape: {SHAPE}")
+    print(f"SSH public key: {SSH_PUB_KEY_PATH}")
     print("=" * 70)
 
     attempt = 1
+    # Conservative retry loop with fixed interval; user should customize for production.
     while True:
         timestamp = time.strftime("%Y-%m-%d %I:%M:%S %p")
-        log_line = f"[{timestamp}] [Attempt #{attempt}] Sending launch request (2 OCPU, 12 GB RAM)..."
+        log_line = f"[{timestamp}] [Attempt #{attempt}] Sending launch request ({OCPUS} OCPU, {MEMORY_IN_GBS} GB RAM)..."
         print(log_line)
-        
+
         try:
-            with open(log_path, "a", encoding="utf-8") as lf:
+            Path(LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        try:
+            with open(LOG_PATH, "a", encoding="utf-8") as lf:
                 lf.write(log_line + "\n")
         except Exception:
             pass
@@ -100,63 +134,70 @@ def run_catcher():
         try:
             response = compute_client.launch_instance(launch_details)
             instance = response.data
-            
-            success_msg = f"""
-======================================================================
->>> SUCCESS! YOUR SERVER HAS BEEN LAUNCHED! <<<
-======================================================================
-Instance Name:    {instance.display_name}
-Instance ID:      {instance.id}
-Lifecycle State:  {instance.lifecycle_state}
-Availability:     {instance.availability_domain}
-Time Created:     {instance.time_created}
-======================================================================
-Server is now provisioning! Check your Oracle Console for Public IP.
-SSH Private Key: C:\\YOUR_FOLDER_PATH\\your_ssh_key
-"""
+
+            success_msg = (
+                "\n" + "=" * 70 + "\n"
+                + "*** SUCCESS: Instance launched (template) ***\n"
+                + f"Instance Name:    {instance.display_name}\n"
+                + f"Instance ID:      {instance.id}\n"
+                + f"Lifecycle State:  {instance.lifecycle_state}\n"
+                + f"Availability:     {instance.availability_domain}\n"
+                + f"Time Created:     {instance.time_created}\n"
+                + "\nCheck the OCI Console for the public IP. Use your private SSH key to connect (not included in this repository).\n"
+            )
+
             print(success_msg)
-            
-            # Save success file
-            with open(SUCCESS_FILE, "w", encoding="utf-8") as sf:
-                sf.write(success_msg)
-            
-            with open(log_path, "a", encoding="utf-8") as lf:
-                lf.write("\n" + success_msg + "\n")
-            
-            # Play alert sound
+            try:
+                with open(SUCCESS_FILE, "w", encoding="utf-8") as sf:
+                    sf.write(success_msg)
+            except Exception:
+                pass
+
+            try:
+                with open(LOG_PATH, "a", encoding="utf-8") as lf:
+                    lf.write(success_msg + "\n")
+            except Exception:
+                pass
+
             play_success_sound()
             break
+
         except oci.exceptions.ServiceError as e:
-            wait_time = 60 if e.status == 429 else 35
-            if "Out of host capacity" in e.message or "capacity" in e.message.lower() or e.status in [500, 429]:
-                status_msg = f"  --> Status: Capacity full in Hyderabad right now. Retrying in {wait_time}s (Attempt #{attempt + 1})...\n"
+            # Basic handling: capacity and rate-limit are retried, others stop.
+            wait_time = 60 if getattr(e, "status", None) == 429 else 35
+            message = getattr(e, "message", "") or str(e)
+            if "capacity" in message.lower() or getattr(e, "status", None) in [429, 500]:
+                status_msg = f"  --> Status: capacity/rate limit. Retrying in {wait_time}s (Attempt #{attempt + 1})...\n"
                 print(status_msg)
                 try:
-                    with open(log_path, "a", encoding="utf-8") as lf:
+                    with open(LOG_PATH, "a", encoding="utf-8") as lf:
                         lf.write(status_msg)
                 except Exception:
                     pass
                 time.sleep(wait_time)
                 attempt += 1
+                continue
             else:
-                err_msg = f"\n[API Error]: {e.status} - {e.message}\nStopping catcher to avoid repeated invalid requests.\n"
+                err_msg = f"\n[API Error]: {getattr(e,'status', 'N/A')} - {message}\nStopping to avoid repeated invalid requests.\n"
                 print(err_msg)
                 try:
-                    with open(log_path, "a", encoding="utf-8") as lf:
+                    with open(LOG_PATH, "a", encoding="utf-8") as lf:
                         lf.write(err_msg)
                 except Exception:
                     pass
                 break
+
         except Exception as ex:
             err_msg = f"\n[Unexpected Error]: {ex}\nRetrying in 45 seconds...\n"
             print(err_msg)
             try:
-                with open(log_path, "a", encoding="utf-8") as lf:
+                with open(LOG_PATH, "a", encoding="utf-8") as lf:
                     lf.write(err_msg)
             except Exception:
                 pass
             time.sleep(45)
             attempt += 1
+
 
 if __name__ == "__main__":
     run_catcher()
