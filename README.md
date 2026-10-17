@@ -1,66 +1,161 @@
-# Oracle Ampere Catcher (Ampere A1 Auto-Catcher)
+# Oracle Ampere Catcher
 
-WARNING: This repository previously contained example SSH key files and a sample OCI config. NEVER commit private keys, credentials, or other secrets into source control. Remove any real keys from this repository and add them to your .gitignore.
+A simple Python script for retrying OCI instance launches until a free Oracle Ampere A1 slot becomes available.
 
-This repository contains a small Python script (`oci_ampere_catcher.py`) that repeatedly attempts to launch an Oracle Cloud Infrastructure (OCI) Ampere A1 instance (VM.Standard.A1.Flex) as soon as capacity is available in a chosen region/availability domain. It is intended as a convenience tool for people trying to automatically claim Always Free or spot Ampere A1 slots when capacity opens up.
+This repository is a sanitized template. Do not commit real OCI keys, private SSH keys, or live OCIDs.
 
-This README is a step-by-step, beginner-friendly guide to configure and run the catcher safely, plus an audit of the code and suggested fixes/improvements.
+## What this repo contains
 
----
+- `oci_ampere_catcher.py` — the launcher script
+- `oci_config` — example OCI config template
+- `your_ssh_key` and `your_ssh_key.pub` — example key placeholders only
+- `requirements.txt` — Python package dependency
+- `.gitignore` — protects secrets and local artifacts
 
-## Quick summary of what's inside
+## Prerequisites
 
-Top-level files you should care about:
-- `oci_ampere_catcher.py` — main script that polls the OCI API and attempts to launch an instance (sanitized template).
-- `oci_config` — example OCI config file (contains placeholders). Replace with your local config and do not commit real credentials.
-- `your_ssh_key` / `your_ssh_key.pub` — placeholder files. Do NOT commit private keys. Keep only template/public examples.
-- `.gitignore` — added to help prevent accidental commits of keys and local files.
-- `requirements.txt` — Python dependencies.
+Before running this script, make sure you have:
 
----
+- Python 3.8+
+- An Oracle Cloud account
+- OCI API key configured locally
+- A valid OCI compartment, subnet, and image ID
+- A public SSH key for the launched instance
 
-## What I changed and why
+## Install dependencies
 
-- Replaced hard-coded Windows/absolute paths with environment-variable-driven configuration in `oci_ampere_catcher.py`.
-- Replaced any example/placeholder OCIDs and sensitive paths with clear template placeholders like `<COMPARTMENT_OCID>`, `<IMAGE_OCID>`, and `<REGION>`.
-- Renamed example SSH files to `your_ssh_key` / `your_ssh_key.pub` (placeholders) and cleared any content to avoid accidental leakage.
-- Added `.gitignore` to exclude private keys, local config files, and logs.
-- Added `requirements.txt` listing the `oci` SDK.
+```bash
+python -m pip install -r requirements.txt
+```
 
----
+## Create your local OCI config
 
-## How to use (short)
+Create a local OCI config file such as:
 
-1. Install dependencies:
+```bash
+mkdir -p ~/.oci
+nano ~/.oci/config
+```
 
-   python -m pip install -r requirements.txt
+Example content:
 
-2. Prepare your OCI environment and keys locally (do NOT commit them):
-   - Create an OCI config file (default `~/.oci/config`) or set `OCI_CONFIG_PATH` to point to it.
-   - Set environment variables or edit the top of `oci_ampere_catcher.py` locally to provide real values for:
-     - COMPARTMENT_ID, AVAILABILITY_DOMAIN, SUBNET_ID, IMAGE_ID
-     - SSH_PUB_KEY_PATH (path to your public SSH key)
+```ini
+[DEFAULT]
+user=<USER_OCID>
+fingerprint=<API_KEY_FINGERPRINT>
+tenancy=<TENANCY_OCID>
+region=<REGION>
+key_file=/home/your-user/.oci/oci_api_key.pem
+```
 
-   Example (bash):
+Important:
+- Keep this file outside the repository.
+- Never push it to GitHub.
+- Replace `<...>` values with your real ones locally only.
 
-     export OCI_CONFIG_PATH=~/.oci/config
-     export COMPARTMENT_ID=ocid1.compartment.oc1..<your-compartment>
-     export SUBNET_ID=ocid1.subnet.oc1..<your-subnet>
-     export IMAGE_ID=ocid1.image.oc1..<your-image>
-     export SSH_PUB_KEY_PATH=~/.ssh/your_ssh_key.pub
+## Create SSH key pair
 
-3. Run the script:
+If you do not already have an SSH key pair:
 
-   python oci_ampere_catcher.py
+```bash
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/your_ssh_key
+```
 
-The script will log attempts to the log path (see CATCHER_LOG_PATH env var) and write a success file when a server is created.
+This creates:
+- `~/.ssh/your_ssh_key` — private key
+- `~/.ssh/your_ssh_key.pub` — public key
 
----
+Use the public key path in the script environment.
 
-## Next steps I can take for you (optional)
+## Set environment variables
 
-- Add argparse support so configuration can be passed via CLI rather than environment variables.
-- Implement exponential backoff with jitter for retries.
-- Add a GitHub Actions workflow to run static checks or tests.
+Set these before running the script:
 
-If you want any of these changes, tell me which ones and I will implement them.
+```bash
+export OCI_CONFIG_PATH="$HOME/.oci/config"
+export OCI_CONFIG_PROFILE="DEFAULT"
+export COMPARTMENT_ID="ocid1.compartment.oc1..REPLACE_WITH_YOURS"
+export AVAILABILITY_DOMAIN="REPLACE_WITH_YOURS"
+export SUBNET_ID="ocid1.subnet.oc1..REPLACE_WITH_YOURS"
+export IMAGE_ID="ocid1.image.oc1..REPLACE_WITH_YOURS"
+export SSH_PUB_KEY_PATH="$HOME/.ssh/your_ssh_key.pub"
+export CATCHER_LOG_PATH="$HOME/ampere_catcher_log.txt"
+export SUCCESS_FILE="$HOME/SERVER_CAUGHT_SUCCESS.txt"
+```
+
+Optional tuning variables:
+
+```bash
+export OCPUS="1"
+export MEMORY_IN_GBS="6"
+export BOOT_VOLUME_GB="50"
+export SHAPE="VM.Standard.A1.Flex"
+export DISPLAY_NAME="your-server"
+```
+
+## Run the script
+
+From the repository root:
+
+```bash
+python oci_ampere_catcher.py
+```
+
+The script will:
+- load your OCI configuration
+- read your public SSH key
+- repeatedly attempt to launch an Ampere A1 flex instance
+- retry on capacity or rate-limit errors
+- save a success file when the instance is created
+
+## What to replace locally
+
+Before using this on your Oracle account, replace these values with your own local values:
+
+- `COMPARTMENT_ID`
+- `AVAILABILITY_DOMAIN`
+- `SUBNET_ID`
+- `IMAGE_ID`
+- `SSH_PUB_KEY_PATH`
+- `OCI_CONFIG_PATH`
+- Your actual OCI config file contents in `~/.oci/config`
+
+## Safety and cost notes
+
+- This script launches real OCI instances.
+- Free-tier capacity is not guaranteed.
+- You may incur charges depending on your tenancy, shape, and quota.
+- Never commit private keys, API keys, or real OCIDs.
+- Keep all secrets outside the repository.
+
+## Troubleshooting
+
+### Authentication errors
+
+Check that:
+- `OCI_CONFIG_PATH` points to the correct file
+- the file contains valid `user`, `fingerprint`, `tenancy`, `region`, and `key_file`
+- the private key exists and matches the uploaded API key
+
+### Permission errors
+
+Make sure the identity used by the OCI key has permission to launch compute instances in the target compartment.
+
+### Capacity errors
+
+If the script keeps printing capacity/rate-limit errors, then no free A1 capacity is available in the selected region or availability domain yet.
+
+## Files to keep local, not in Git
+
+These should stay on your machine only:
+
+- `~/.oci/config`
+- `~/.oci/oci_api_key.pem`
+- `~/.ssh/your_ssh_key`
+- `~/.ssh/your_ssh_key.pub`
+- local log files and success files
+
+## License
+
+This repository is a template for personal use. Add a license if you want to publish it with explicit reuse terms.
+
